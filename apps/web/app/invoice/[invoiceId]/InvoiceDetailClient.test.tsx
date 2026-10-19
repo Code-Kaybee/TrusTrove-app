@@ -1,10 +1,15 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import InvoiceDetailClient from "./InvoiceDetailClient";
 import { useInvoice, useInvoiceActions } from "@/hooks/useInvoices";
 import { useWalletStore } from "@/store/wallet";
-import { useRouter } from "next/navigation";
 import type { Invoice } from "@/types";
 import { generateInvoicePdf } from "@/lib/invoicePdf";
 
@@ -192,8 +197,6 @@ describe("InvoiceDetailClient", () => {
   });
 
   it("renders the not-found state and returns to the dashboard", () => {
-    const push = vi.fn();
-    vi.mocked(useRouter).mockReturnValue({ push } as any);
     vi.mocked(useInvoice).mockReturnValue({
       invoice: undefined,
       isLoading: false,
@@ -206,10 +209,38 @@ describe("InvoiceDetailClient", () => {
     expect(screen.getByText(/Ledger entry not found/i)).toBeInTheDocument();
     expect(screen.getByText(new RegExp(INVOICE_ID))).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Return to Dashboard/i }),
+    expect(
+      screen.getByRole("link", { name: /Return to Dashboard/i }),
+    ).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("uses a breadcrumb landmark, a current-page item, and level-two section headings", () => {
+    render(<InvoiceDetailClient invoiceId={INVOICE_ID} />);
+
+    const breadcrumb = screen.getByRole("navigation", {
+      name: /breadcrumb/i,
+    });
+    const crumbs = within(breadcrumb).getAllByRole("link");
+    expect(crumbs).toHaveLength(1);
+    expect(crumbs[0]).toHaveAccessibleName(/Dashboard/i);
+    expect(crumbs[0]).toHaveAttribute("href", "/dashboard");
+    expect(within(breadcrumb).getByText(/Invoice #/i)).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-    expect(push).toHaveBeenCalledWith("/dashboard");
+
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    for (const name of [
+      /Soroban Transaction Progress/i,
+      /Obligation Parties/i,
+      /Escrow Security Vault/i,
+      /Maturity Parameters/i,
+      /Share Invoice/i,
+    ]) {
+      expect(
+        screen.getByRole("heading", { name, level: 2 }),
+      ).toBeInTheDocument();
+    }
   });
 
   it("renders the full invoice detail view for a funded invoice", () => {
@@ -395,6 +426,12 @@ describe("InvoiceDetailClient", () => {
 
     fireEvent.click(copyButtons[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(ISSUER));
+    // The clipboard write resolves before React commits the "copied" state,
+    // so wait for the first button to actually relabel before selecting the
+    // second one (otherwise both still match /^COPY$/).
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /^COPY$/ })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /^COPY$/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(BUYER));
